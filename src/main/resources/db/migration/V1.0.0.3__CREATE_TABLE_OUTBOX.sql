@@ -1,0 +1,12 @@
+-- Lida pelo Debezium (CDC): cada insert é publicado no tópico TXT_TOPICO (ADR 0002)
+CREATE TABLE OUTBOX (
+    ID_OUTBOX VARCHAR(36) NOT NULL PRIMARY KEY,
+    -- Id da Transação que gerou o evento; vai no header X-Id-Transacao para os consumidores
+    ID_TRANSACAO VARCHAR(255) NOT NULL,
+    TXT_TOPICO VARCHAR(255) NOT NULL,
+    TXT_CHAVE VARCHAR(255),
+    TXT_BODY TEXT NOT NULL,
+    DAT_CRIACAO_REGISTRO TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IDX_OUTBOX_ID_TRANSACAO ON OUTBOX (ID_TRANSACAO);

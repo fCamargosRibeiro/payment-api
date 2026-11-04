@@ -1,0 +1,54 @@
+spring:
+  application:
+    name: "payment-api-test"
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pagamentodb
+    username: myuser
+    password: secret
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      connection-timeout: 20000
+      maximum-pool-size: 10
+  flyway:
+    url: jdbc:postgresql://localhost:5432/pagamentodb
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  kafka:
+    bootstrap-servers: localhost:9092
+    listener:
+      ack-mode: manual
+      concurrency: 5
+    consumer:
+      group-id: ${spring.application.name}_test
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      max-poll-records: 500
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 5
+      batch-size: 16384
+      linger-ms: 100
+    properties:
+      reconnect:
+        backoff:
+          ms: 50
+      retry:
+        backoff:
+          ms: 50
+
+# Logging
+logging:
+  level:
+    root: INFO
+    br.com.api.payment: DEBUG
+    org.springframework.kafka: INFO
+

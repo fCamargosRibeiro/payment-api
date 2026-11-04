@@ -1,0 +1,14 @@
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/pagamentodb
+  flyway:
+    url: jdbc:postgresql://localhost:5432/pagamentodb
+  kafka:
+    bootstrap-servers: localhost:29092
+
+
+logging:
+  level:
+    root: INFO
+    br.com.api.payment: INFO
+    org.springframework.kafka.listener: INFO

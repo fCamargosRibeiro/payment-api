@@ -1,0 +1,134 @@
+services:
+  postgres:
+    image: 'postgres:latest'
+    environment:
+      # Nome do banco de dados a ser criado
+      POSTGRES_DB: pagamentodb
+      # Usuário padrão do PostgreSQL
+      POSTGRES_USER: myuser
+      # Senha do usuário
+      POSTGRES_PASSWORD: secret
+    # Replicação lógica: permite ao Debezium ler o WAL (CDC) da tabela OUTBOX
+    command: [ 'postgres', '-c', 'wal_level=logical' ]
+    ports:
+      - '5432:5432'
+    # Aguardar o PostgreSQL estar pronto antes de iniciar containers dependentes
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U myuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  kafka:
+    image: 'apache/kafka:4.4.0'
+    environment:
+      # ID único deste nó Kafka no cluster (pode ser 1, 2, 3, etc.)
+      KAFKA_NODE_ID: 1
+      
+      # Papéis que este nó desempenhará: 'broker' (armazena mensagens) e 'controller' (coordena cluster)
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      
+      # Define os voters para eleição de controller - formato: 'id@host:porta'
+      # Esse nó (1) usa a porta 9093 para comunicação de controle
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
+      
+      # Lista de protocolos e portas que o Kafka escuta
+      # PLAINTEXT (porta 9092): Protocolo sem encriptação para clientes
+      # CONTROLLER (porta 9093): Protocolo para comunicação entre brokers/controllers
+      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:29092,CONTROLLER://0.0.0.0:9093'
+
+      # Endereço anunciado para clientes externos (o que eles usam para conectar)
+      # kafka:9092 para comunicação interna (Docker), localhost:29092 para acesso externo (host)
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092'
+      
+      # Define qual protocolo é usado para comunicação de controle (eleição, sincronização)
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      
+      # Mapeia nome do protocolo para tipo de segurança
+      # CONTROLLER usa PLAINTEXT (sem encriptação), PLAINTEXT também usa PLAINTEXT
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      
+      # Número padrão de partições para tópicos criados no broker
+      KAFKA_NUM_PARTITIONS: 1
+
+      # Fator de replicação para o tópico de offsets (_consumer_offsets)
+      # 1 = armazenado em 1 broker (suficiente para desenvolvimento)
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      
+      # Fator de replicação para o tópico de estado transacional (_transaction_state)
+      # 1 = armazenado em 1 broker (suficiente para desenvolvimento)
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      
+      # Número mínimo de réplicas sincronizadas para transações
+      # 1 = apenas 1 réplica é suficiente (adequado para ambiente single-node)
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      # Habilitar o protocolo 'share' para KIP-932 (Share Groups)
+      KAFKA_GROUP_COORDINATOR_REBALANCE_PROTOCOLS: 'classic,consumer,streams,share'
+      
+      # Fator de replicação e min ISR para o tópico do Share Group (__share_group_state) em single-node
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_SHARE_COORDINATOR_STATE_TOPIC_MIN_ISR: 1
+
+      # ID único do cluster (gerado aleatoriamente, identifica a rede Kafka)
+      # Todos os brokers no mesmo cluster devem ter o mesmo CLUSTER_ID
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+    ports:
+      - '9092:9092'
+      - '29092:29092'
+
+  kafka-init-topics:
+    image: 'apache/kafka:4.4.0'
+    depends_on:
+      - kafka
+    entrypoint: [ '/bin/bash', '-c' ]
+    command: |
+      "
+      # Aguarda o broker Kafka estar pronto para receber comandos
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --list
+      echo 'Garantindo criação do tópico pagamento-v1 com 1 partição...'
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --create --if-not-exists --topic pagamento-v1 --partitions 1 --replication-factor 1
+      echo 'Tópicos configurados com sucesso no broker:'
+      /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 --describe --topic pagamento-v1
+      "
+
+  # Kafka Connect com Debezium: publica no Kafka cada insert da OUTBOX (ADR 0002)
+  connect:
+    image: 'quay.io/debezium/connect:3.3'
+    depends_on:
+      - kafka
+      - postgres
+    environment:
+      BOOTSTRAP_SERVERS: 'kafka:9092'
+      GROUP_ID: 'payment-api-connect'
+      CONFIG_STORAGE_TOPIC: 'connect_configs'
+      OFFSET_STORAGE_TOPIC: 'connect_offsets'
+      STATUS_STORAGE_TOPIC: 'connect_statuses'
+      # Tópicos internos do Connect com 1 réplica (broker single-node)
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+    ports:
+      - '8083:8083'
+
+  # Registra (ou atualiza) o conector da outbox assim que o Connect responder
+  connect-init:
+    image: 'curlimages/curl:8.11.1'
+    depends_on:
+      - connect
+    volumes:
+      - ./debezium/outbox-connector.json:/connector.json:ro
+    entrypoint: [ 'sh', '-c' ]
+    command: |
+      "
+      until curl -sf http://connect:8083/connectors > /dev/null; do echo 'Aguardando Kafka Connect...'; sleep 3; done
+      curl -sf -X PUT -H 'Content-Type: application/json' --data @/connector.json http://connect:8083/connectors/outbox-connector/config
+      echo
+      echo 'Conector outbox-connector registrado'
+      "
+
+
+networks:
+  default:
+    name: pagamento-network
+    driver: bridge
