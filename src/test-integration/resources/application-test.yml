@@ -1,0 +1,13 @@
+spring:
+  output.ansi.enabled: ALWAYS
+  application:
+    name: "payment-api-test"
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+logging:
+  level:
+    root: INFO
+    br.com.api.payment: DEBUG
