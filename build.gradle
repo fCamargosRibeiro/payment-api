@@ -24,6 +24,38 @@ repositories {
     }
 }
 
+sourceSets {
+    // Testes de componente: aplicação inteira de ponta a ponta (HTTP → banco → outbox → Debezium → Kafka → consumer)
+    testComponent {
+        java {
+            srcDir 'src/test-component/java'
+        }
+        resources {
+            srcDir 'src/test-component/resources'
+        }
+        compileClasspath += main.output + test.output
+        runtimeClasspath += main.output + test.output
+    }
+    // Testes de integração: contexto reduzido (camada web, Kafka, banco)
+    testIntegration {
+        java {
+            srcDir 'src/test-integration/java'
+        }
+        resources {
+            srcDir 'src/test-integration/resources'
+        }
+        compileClasspath += main.output + test.output
+        runtimeClasspath += main.output + test.output
+    }
+}
+
+configurations {
+    testComponentImplementation.extendsFrom testImplementation
+    testComponentRuntimeOnly.extendsFrom testRuntimeOnly
+    testIntegrationImplementation.extendsFrom testImplementation
+    testIntegrationRuntimeOnly.extendsFrom testRuntimeOnly
+}
+
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-flyway'
     implementation 'org.springframework.boot:spring-boot-starter-kafka'
@@ -45,6 +77,12 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-flyway-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-kafka-test'
     testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
+    testImplementation 'org.testcontainers:testcontainers-postgresql'
+    testImplementation 'org.testcontainers:testcontainers-kafka'
+    testImplementation 'org.awaitility:awaitility'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 dependencyManagement {
@@ -56,3 +94,23 @@ dependencyManagement {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+tasks.register('testComponent', Test) {
+    description = 'Runs component tests.'
+    group = 'verification'
+    testClassesDirs = sourceSets.testComponent.output.classesDirs
+    classpath = sourceSets.testComponent.runtimeClasspath
+    failFast = true
+    useJUnitPlatform()
+}
+
+tasks.register('testIntegration', Test) {
+    description = 'Runs integration tests.'
+    group = 'verification'
+    testClassesDirs = sourceSets.testIntegration.output.classesDirs
+    classpath = sourceSets.testIntegration.runtimeClasspath
+    failFast = true
+    useJUnitPlatform()
+}
+
+check.dependsOn(test, testIntegration, testComponent)

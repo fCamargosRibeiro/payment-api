@@ -62,6 +62,11 @@ class NotificacaoConsumer {
             // Erro de Negócio é definitivo e já foi registrado na idempotência
             ack.acknowledge();
             log.warn("Notificação {} recusada: {}", idTransacao, e.getMessage());
+        } catch (RuntimeException e) {
+            // Falha transitória (ex.: banco): a transação foi desfeita, então a mensagem volta para nova entrega.
+            // Sem isso o container de Share Group rejeitaria a mensagem e a notificação se perderia
+            ack.release();
+            log.error("Falha ao processar a notificação {}; mensagem liberada para nova entrega", idTransacao, e);
         } finally {
             MDC.remove("idPagamento");
         }

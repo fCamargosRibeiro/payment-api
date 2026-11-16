@@ -1,0 +1,12 @@
+spring:
+  output.ansi.enabled: ALWAYS
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+logging:
+  level:
+    root: INFO
+    br.com.api.payment: DEBUG
+    org.springframework.kafka.listener: INFO
